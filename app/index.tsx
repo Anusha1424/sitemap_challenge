@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -13,6 +14,7 @@ import {
 } from 'react-native';
 
 const API_KEY = 'a9745c9a991f45bdaeb3cf954b034234';
+const SEARCH_HISTORY_KEY = 'SearchHistory';
 
 interface Article {
   source: {
@@ -32,6 +34,38 @@ const App: React.FC = () => {
   const [search, setSearch] = useState<string>('');
   const [articles, setArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
+  const [searchHistory, setSearchHistory] = useState<string[]>([]);
+
+  useEffect(() => {
+    loadSearchHistory();
+  }, []);
+
+  const loadSearchHistory = async () => {
+    try {
+      const history = await AsyncStorage.getItem(SEARCH_HISTORY_KEY);
+      if (history !== null) {
+        setSearchHistory(JSON.parse(history));
+      }
+    } catch (error) {
+      console.error('Error loading search history:', error);
+    }
+  };
+  const saveSearchHistory = async (query: string) => {
+    try {
+      let updatedHistory = [
+        query,
+        ...searchHistory.filter((item) => item !== query),
+      ];
+      updatedHistory = updatedHistory.slice(0, 3);
+      setSearchHistory(updatedHistory);
+      await AsyncStorage.setItem(
+        SEARCH_HISTORY_KEY,
+        JSON.stringify(updatedHistory)
+      );
+    } catch (error) {
+      console.error('Error saving search history:', error);
+    }
+  };
 
   const fetchArticles = async (query: string) => {
     setLoading(true);
@@ -42,8 +76,9 @@ const App: React.FC = () => {
       const data = await response.json();
       setArticles(data.articles);
       setLoading(false);
+      saveSearchHistory(query);
     } catch (error) {
-      console.error(error);
+      console.error('Error fetching articles:', error);
       setLoading(false);
     }
   };
@@ -55,31 +90,21 @@ const App: React.FC = () => {
   const handleSearchButtonPress = () => {
     if (search) {
       fetchArticles(search);
-      Keyboard.dismiss(); // Close keyboard after button press
+      Keyboard.dismiss();
     }
   };
 
-  const renderItem = ({ item }: { item: Article }) => (
-    <View style={styles.card}>
-      <Text style={styles.title}>{item.title}</Text>
-      {item.urlToImage && (
-        <Image
-          style={styles.image}
-          resizeMode="cover"
-          source={{ uri: item.urlToImage }}
-        />
-      )}
-      <Text style={styles.author}>By {item.author}</Text>
-      <Text style={styles.description}>{item.description}</Text>
-      <TouchableOpacity onPress={() => Linking.openURL(item.url)}>
-        <Text style={styles.url}>{item.url}</Text>
-      </TouchableOpacity>
-    </View>
-  );
+  const handleHistoryItemPress = (item: string) => {
+    setSearch(item);
+    fetchArticles(item);
+  };
 
   return (
     <View style={styles.container}>
-      <View style={styles.searchContainer}>
+      <TouchableOpacity
+        style={styles.searchBarContainer}
+        onPress={() => Keyboard.dismiss()}
+      >
         <TextInput
           style={styles.searchBar}
           placeholder="Type Here..."
@@ -92,13 +117,48 @@ const App: React.FC = () => {
         >
           <Text style={styles.searchButtonText}>Search</Text>
         </TouchableOpacity>
-      </View>
+      </TouchableOpacity>
+      {searchHistory.length > 0 && (
+        <View style={styles.historyContainer}>
+          <Text style={styles.historyTitle}>Recent Searches:</Text>
+          <FlatList
+            data={searchHistory}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.historyItem}
+                onPress={() => handleHistoryItemPress(item)}
+              >
+                <Text>{item}</Text>
+              </TouchableOpacity>
+            )}
+            keyExtractor={(item, index) => `${item}-${index}`}
+          />
+        </View>
+      )}
       {loading ? (
         <ActivityIndicator size="large" color="#0000ff" />
       ) : (
         <FlatList
           data={articles}
-          renderItem={renderItem}
+          renderItem={({ item }) => (
+            <View style={styles.card}>
+              <Text style={styles.title}>{item.title}</Text>
+              {item.urlToImage && (
+                <Image
+                  style={styles.image}
+                  resizeMode="cover"
+                  source={{ uri: item.urlToImage }}
+                />
+              )}
+              <Text style={styles.author}>By {item.author}</Text>
+              <Text style={styles.description}>{item.description}</Text>
+              <TouchableOpacity onPress={() => Linking.openURL(item.url)}>
+                <Text style={styles.url}>{item.url}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
           keyExtractor={(item, index) => `${item.title}-${index}`}
           contentContainerStyle={{ flexGrow: 1 }}
           ListEmptyComponent={() => (
@@ -116,9 +176,10 @@ const styles = StyleSheet.create({
     paddingTop: 40,
     backgroundColor: '#f8f8f8',
   },
-  searchContainer: {
+  searchBarContainer: {
     flexDirection: 'row',
-    margin: 10,
+    marginHorizontal: 10,
+    marginBottom: 10,
   },
   searchBar: {
     flex: 1,
@@ -141,6 +202,21 @@ const styles = StyleSheet.create({
   searchButtonText: {
     color: '#fff',
     fontSize: 16,
+  },
+  historyContainer: {
+    marginHorizontal: 10,
+    marginBottom: 10,
+  },
+  historyTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 5,
+  },
+  historyItem: {
+    padding: 10,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 5,
+    marginRight: 10,
   },
   emptyMessage: {
     textAlign: 'center',
